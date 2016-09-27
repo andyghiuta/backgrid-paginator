@@ -56,3 +56,24 @@
   color: #999999;
   cursor: default;
 }
+
+.backgrid-paginator ul > li:first-child > a:before {
+  display: inline-block;
+  height: 10px;
+  font-size: 14px;
+  border-left: 1px solid #333;
+  content: "";
+}
+
+.backgrid-paginator ul > li:last-child > a:after {
+  display: inline-block;
+  height: 10px;
+  font-size: 14px;
+  border-right: 1px solid #333;
+  content: "";
+}
+
+.backgrid-paginator ul > li.disabled:first-child > a:before,
+.backgrid-paginator ul > li.disabled:last-child > a:after {
+  border-color: #999;
+}

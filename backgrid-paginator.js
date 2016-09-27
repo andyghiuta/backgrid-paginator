@@ -285,7 +285,7 @@
     */
     controls: {
       first: {
-        label: "F",
+        label: "&#xf100;",
         title: "First Page"
       },
       rewind: {
@@ -305,7 +305,7 @@
         title: "Next Interval"
       },
       last: {
-        label: "L",
+        label: "&#xf101;",
         title: "Last Page"
       }
     },
