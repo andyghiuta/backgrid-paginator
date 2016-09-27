@@ -37,7 +37,7 @@
      class under control mode has no effect and the correct page index will
      always be inferred from the `is*` flag. Only one of the `is*` flags should
      be set to `true` at a time. For example, an instance of this class cannot
-     simultaneously be a rewind control and a fast forward control. A `label`
+     simultaneously be a first control and a fast forward control. A `label`
      and a `title` function or a string are required to be passed to the
      constuctor under this mode. If a `title` function is provided, it __MUST__
      accept a hash parameter `data`, which contains a key `label`. Its result
@@ -89,10 +89,10 @@
     },
 
     /**
-       @property {boolean} isRewind Whether this handle represents a rewind
+       @property {boolean} isFirst Whether this handle represents a first
        control
     */
-    isRewind: false,
+    isFirst: false,
 
     /**
        @property {boolean} isBack Whether this handle represents a back
@@ -101,16 +101,28 @@
     isBack: false,
 
     /**
+       @property {boolean} isRewind Whether this handle represents a prev interval
+       control
+    */
+    isRewind: false,
+
+    /**
        @property {boolean} isForward Whether this handle represents a forward
        control
     */
     isForward: false,
 
     /**
-       @property {boolean} isFastForward Whether this handle represents a fast
-       forward control
+       @property {boolean} isFastForward Whether this handle represents a next interval
+       control
     */
     isFastForward: false,
+
+    /**
+       @property {boolean} isLast Whether this handle represents a fast
+       forward control
+    */
+    isLast: false,
 
     /**
        Initializer.
@@ -124,10 +136,12 @@
        anchor text, otherwise the normalized pageIndex will be used
        instead. Required if any of the `is*` flags is set to `true`.
        @param {string} [options.title]
+       @param {boolean} [options.isFirst=false]
        @param {boolean} [options.isRewind=false]
        @param {boolean} [options.isBack=false]
        @param {boolean} [options.isForward=false]
        @param {boolean} [options.isFastForward=false]
+       @param {boolean} [options.isLast=false]
     */
     initialize: function (options) {
       var collection = this.collection;
@@ -135,20 +149,24 @@
       var currentPage = state.currentPage;
       var firstPage = state.firstPage;
       var lastPage = state.lastPage;
+      var intervalSize = options.intervalSize;
 
       _.extend(this, _.pick(options,
-                            ["isRewind", "isBack", "isForward", "isFastForward"]));
+                            ["isFirst", "isRewind", "isBack", "isForward", "isFastForward", "isLast"]));
 
       var pageIndex;
-      if (this.isRewind) pageIndex = firstPage;
+      if (this.isFirst) pageIndex = firstPage;
+      else if (this.isRewind) pageIndex = Math.max(0, currentPage - intervalSize);
       else if (this.isBack) pageIndex = Math.max(firstPage, currentPage - 1);
       else if (this.isForward) pageIndex = Math.min(lastPage, currentPage + 1);
-      else if (this.isFastForward) pageIndex = lastPage;
+      else if (this.isFastForward) pageIndex = Math.min(lastPage, currentPage + intervalSize);
+      else if (this.isLast) pageIndex = lastPage;
       else {
         pageIndex = +options.pageIndex;
         pageIndex = (firstPage ? pageIndex + 1 : pageIndex);
       }
       this.pageIndex = pageIndex;
+      this.intervalSize = intervalSize;
 
       this.label = (options.label || (firstPage ? pageIndex : pageIndex + 1)) + '';
       var title = options.title || this.title;
@@ -171,16 +189,21 @@
       var currentPage = state.currentPage;
       var pageIndex = this.pageIndex;
 
-      if (this.isRewind && currentPage == state.firstPage ||
+      if (this.isFirst && currentPage == state.firstPage ||
          this.isBack && !collection.hasPreviousPage() ||
          this.isForward && !collection.hasNextPage() ||
-         this.isFastForward && (currentPage == state.lastPage || state.totalPages < 1)) {
+         this.isLast && (currentPage == state.lastPage || state.totalPages < 1) ||
+         this.isRewind && (currentPage - this.intervalSize < 0) ||
+         this.isFastForward && (currentPage + this.intervalSize > state.totalPages)
+         ) {
         this.$el.addClass("disabled");
       }
-      else if (!(this.isRewind ||
+      else if (!(this.isFirst ||
+                 this.isRewind ||
                  this.isBack ||
                  this.isForward ||
-                 this.isFastForward) &&
+                 this.isFastForward ||
+                 this.isLast) &&
                state.currentPage == pageIndex) {
         this.$el.addClass("active");
       }
@@ -197,10 +220,12 @@
       e.preventDefault();
       var $el = this.$el, col = this.collection;
       if (!$el.hasClass("active") && !$el.hasClass("disabled")) {
-        if (this.isRewind) col.getFirstPage({reset: true});
+        if (this.isFirst) col.getFirstPage({reset: true});
+        else if (this.isRewind) col.getPage(this.pageIndex, {reset: true});
         else if (this.isBack) col.getPreviousPage({reset: true});
         else if (this.isForward) col.getNextPage({reset: true});
-        else if (this.isFastForward) col.getLastPage({reset: true});
+        else if (this.isFastForward) col.getPage(this.pageIndex, {reset: true});
+        else if (this.isLast) col.getLastPage({reset: true});
         else col.getPage(this.pageIndex, {reset: true});
       }
       return this;
@@ -213,7 +238,7 @@
      pagination handles. This extension is best used for splitting a large data
      set across multiple pages. If the number of pages is larger then a
      threshold, which is set to 10 by default, the page handles are rendered
-     within a sliding window, plus the rewind, back, forward and fast forward
+     within a sliding interval, plus the first, back, forward and fast forward
      control handles. The individual control handles can be turned off.
 
      @class Backgrid.Extension.Paginator
@@ -223,13 +248,25 @@
     /** @property */
     className: "backgrid-paginator",
 
-    /** @property */
+    /**
+     * Used to define the amount of pages to display at once
+     *
+     * @type {Number}
+     */
+    intervalSize: 10,
+
+    /**
+     * @deprecated Renamed to avoid confusions with the "window" global object
+     * @see intervalSize
+     *
+     * @type {Number}
+     */
     windowSize: 10,
 
     /**
        @property {number} slideScale the number used by #slideHowMuch to scale
-       `windowSize` to yield the number of pages to slide. For example, the
-       default windowSize(10) * slideScale(0.5) yields 5, which means the window
+       `intervalSize` to yield the number of pages to slide. For example, the
+       default intervalSize(10) * slideScale(0.5) yields 5, which means the interval
        will slide forward 5 pages as soon as you've reached page 6. The smaller
        the scale factor the less pages to slide, and vice versa.
 
@@ -247,21 +284,29 @@
        changes taking precedent.
     */
     controls: {
+      first: {
+        label: "F",
+        title: "First Page"
+      },
       rewind: {
-        label: "《",
-        title: "First"
+        label: "&#xf100;",
+        title: "Previous Interval"
       },
       back: {
-        label: "〈",
-        title: "Previous"
+        label: "&#xf104;",
+        title: "Previous Page"
       },
       forward: {
-        label: "〉",
-        title: "Next"
+        label: "&#xf105;",
+        title: "Next Page"
       },
       fastForward: {
-        label: "》",
-        title: "Last"
+        label: "&#xf101;",
+        title: "Next Interval"
+      },
+      last: {
+        label: "L",
+        title: "Last Page"
       }
     },
 
@@ -299,7 +344,13 @@
       self.controls = _.defaults(options.controls || {}, self.controls,
                                  Paginator.prototype.controls);
 
-      _.extend(self, _.pick(options || {}, "windowSize", "pageHandle",
+      // ensure we have the interval size taken from windowSize if it's still in use
+      // TODO remove this with the removal of windowSize
+      if (options.windowSize && 'undefined' === typeof options.intervalSize) {
+        options.intervalSize = options.windowSize;
+      }
+
+      _.extend(self, _.pick(options || {}, "intervalSize", "pageHandle",
                             "slideScale", "goBackFirstOnSort",
                             "renderIndexedPageHandles",
                             "renderMultiplePagesOnly"));
@@ -314,27 +365,27 @@
     },
 
     /**
-      Decides whether the window should slide. This method should return 1 if
+      Decides whether the interval should slide. This method should return 1 if
       sliding should occur and 0 otherwise. The default is sliding should occur
-      if half of the pages in a window has been reached.
+      if half of the pages in a interval has been reached.
 
       __Note__: All the parameters have been normalized to be 0-based.
 
       @param {number} firstPage
       @param {number} lastPage
       @param {number} currentPage
-      @param {number} windowSize
+      @param {number} intervalSize
       @param {number} slideScale
 
       @return {0|1}
      */
-    slideMaybe: function (firstPage, lastPage, currentPage, windowSize, slideScale) {
-      return Math.round(currentPage % windowSize / windowSize);
+    slideMaybe: function (firstPage, lastPage, currentPage, intervalSize, slideScale) {
+      return Math.round(currentPage % intervalSize / intervalSize);
     },
 
     /**
       Decides how many pages to slide when sliding should occur. The default
-      simply scales the `windowSize` to arrive at a fraction of the `windowSize`
+      simply scales the `intervalSize` to arrive at a fraction of the `intervalSize`
       to increment.
 
       __Note__: All the parameters have been normalized to be 0-based.
@@ -342,16 +393,16 @@
       @param {number} firstPage
       @param {number} lastPage
       @param {number} currentPage
-      @param {number} windowSize
+      @param {number} intervalSize
       @param {number} slideScale
 
       @return {number}
      */
-    slideThisMuch: function (firstPage, lastPage, currentPage, windowSize, slideScale) {
-      return ~~(windowSize * slideScale);
+    slideThisMuch: function (firstPage, lastPage, currentPage, intervalSize, slideScale) {
+      return ~~(intervalSize * slideScale);
     },
 
-    _calculateWindow: function () {
+    _calculateInterval: function () {
       var collection = this.collection;
       var state = collection.state;
 
@@ -361,15 +412,15 @@
       lastPage = Math.max(0, firstPage ? lastPage - 1 : lastPage);
       var currentPage = Math.max(state.currentPage, state.firstPage);
       currentPage = firstPage ? currentPage - 1 : currentPage;
-      var windowSize = this.windowSize;
+      var intervalSize = this.intervalSize;
       var slideScale = this.slideScale;
-      var windowStart = Math.floor(currentPage / windowSize) * windowSize;
+      var intervalStart = Math.floor(currentPage / intervalSize) * intervalSize;
       if (currentPage <= lastPage - this.slideThisMuch()) {
-        windowStart += (this.slideMaybe(firstPage, lastPage, currentPage, windowSize, slideScale) *
-                        this.slideThisMuch(firstPage, lastPage, currentPage, windowSize, slideScale));
+        intervalStart += (this.slideMaybe(firstPage, lastPage, currentPage, intervalSize, slideScale) *
+                        this.slideThisMuch(firstPage, lastPage, currentPage, intervalSize, slideScale));
       }
-      var windowEnd = Math.min(lastPage + 1, windowStart + windowSize);
-      return [windowStart, windowEnd];
+      var intervalEnd = Math.min(lastPage + 1, intervalStart + intervalSize);
+      return [intervalStart, intervalEnd];
     },
 
     /**
@@ -382,11 +433,11 @@
       var handles = [];
       var collection = this.collection;
 
-      var window = this._calculateWindow();
-      var winStart = window[0], winEnd = window[1];
+      var interval = this._calculateInterval();
+      var intervalStart = interval[0], intervalEnd = interval[1];
 
       if (this.renderIndexedPageHandles) {
-        for (var i = winStart; i < winEnd; i++) {
+        for (var i = intervalStart; i < intervalEnd; i++) {
           handles.push(new this.pageHandle({
             collection: collection,
             pageIndex: i
@@ -394,18 +445,20 @@
         }
       }
 
-      var controls = this.controls;
-      _.each(["back", "rewind", "forward", "fastForward"], function (key) {
+      var controls = this.controls,
+        intervalSize = this.intervalSize;
+      _.each(["back", "rewind", "first", "forward", "fastForward", "last"], function (key) {
         var value = controls[key];
         if (value) {
           var handleCtorOpts = {
             collection: collection,
             title: value.title,
-            label: value.label
+            label: value.label,
+            intervalSize: intervalSize
           };
           handleCtorOpts["is" + key.slice(0, 1).toUpperCase() + key.slice(1)] = true;
           var handle = new this.pageHandle(handleCtorOpts);
-          if (key == "rewind" || key == "back") handles.unshift(handle);
+          if (key == "first" || key == "rewind" || key == "back") handles.unshift(handle);
           else handles.push(handle);
         }
       }, this);
