@@ -150,16 +150,18 @@
       var firstPage = state.firstPage;
       var lastPage = state.lastPage;
       var intervalSize = options.intervalSize;
+      this.rewindPages =  currentPage - Math.max(0, firstPage > (currentPage - intervalSize) ? Math.floor(intervalSize / 2) : (intervalSize));
+      this.fastForwardPages =  currentPage + Math.min(lastPage, lastPage < (currentPage + intervalSize) ? Math.ceil(intervalSize / 2) : (intervalSize));
 
       _.extend(this, _.pick(options,
                             ["isFirst", "isRewind", "isBack", "isForward", "isFastForward", "isLast"]));
 
       var pageIndex;
       if (this.isFirst) pageIndex = firstPage;
-      else if (this.isRewind) pageIndex = Math.max(0, currentPage - intervalSize);
+      else if (this.isRewind) pageIndex = this.rewindPages;
       else if (this.isBack) pageIndex = Math.max(firstPage, currentPage - 1);
       else if (this.isForward) pageIndex = Math.min(lastPage, currentPage + 1);
-      else if (this.isFastForward) pageIndex = Math.min(lastPage, currentPage + intervalSize);
+      else if (this.isFastForward) pageIndex = this.fastForwardPages;
       else if (this.isLast) pageIndex = lastPage;
       else {
         pageIndex = +options.pageIndex;
@@ -188,13 +190,13 @@
       var state = collection.state;
       var currentPage = state.currentPage;
       var pageIndex = this.pageIndex;
-
+      console.log(this.rewindPages, this.fastForwardPages);
       if (this.isFirst && currentPage == state.firstPage ||
          this.isBack && !collection.hasPreviousPage() ||
          this.isForward && !collection.hasNextPage() ||
          this.isLast && (currentPage == state.lastPage || state.totalPages < 1) ||
-         this.isRewind && (currentPage - this.intervalSize < 0) ||
-         this.isFastForward && (currentPage + this.intervalSize > state.totalPages)
+         this.isRewind && (this.rewindPages <= 0) ||
+         this.isFastForward && (this.fastForwardPages > state.totalPages)
          ) {
         this.$el.addClass("disabled");
       }
@@ -249,33 +251,9 @@
     className: "backgrid-paginator",
 
     /**
-     * Used to define the amount of pages to display at once
-     *
-     * @type {Number}
-     */
-    intervalSize: 10,
-
-    /**
-     * @deprecated Renamed to avoid confusions with the "window" global object
-     * @see intervalSize
-     *
-     * @type {Number}
-     */
-    windowSize: 10,
-
-    /**
-       @property {number} slideScale the number used by #slideHowMuch to scale
-       `intervalSize` to yield the number of pages to slide. For example, the
-       default intervalSize(10) * slideScale(0.5) yields 5, which means the interval
-       will slide forward 5 pages as soon as you've reached page 6. The smaller
-       the scale factor the less pages to slide, and vice versa.
-
-       Also See:
-
-       - #slideMaybe
-       - #slideHowMuch
+       @property {number} how many pages to display
     */
-    slideScale: 0.5,
+    intervalSize: 10,
 
     /**
        @property {Object.<string, Object.<string, string>>} controls You can
@@ -344,14 +322,9 @@
       self.controls = _.defaults(options.controls || {}, self.controls,
                                  Paginator.prototype.controls);
 
-      // ensure we have the interval size taken from windowSize if it's still in use
-      // TODO remove this with the removal of windowSize
-      if (options.windowSize && 'undefined' === typeof options.intervalSize) {
-        options.intervalSize = options.windowSize;
-      }
 
       _.extend(self, _.pick(options || {}, "intervalSize", "pageHandle",
-                            "slideScale", "goBackFirstOnSort",
+                            "goBackFirstOnSort",
                             "renderIndexedPageHandles",
                             "renderMultiplePagesOnly"));
 
@@ -364,42 +337,12 @@
       });
     },
 
-    /**
-      Decides whether the interval should slide. This method should return 1 if
-      sliding should occur and 0 otherwise. The default is sliding should occur
-      if half of the pages in a interval has been reached.
-
-      __Note__: All the parameters have been normalized to be 0-based.
-
-      @param {number} firstPage
-      @param {number} lastPage
-      @param {number} currentPage
-      @param {number} intervalSize
-      @param {number} slideScale
-
-      @return {0|1}
-     */
-    slideMaybe: function (firstPage, lastPage, currentPage, intervalSize, slideScale) {
-      return Math.round(currentPage % intervalSize / intervalSize);
+    getPagesBefore: function(currentPage, intervalSize){
+      return Math.floor(intervalSize  / 2);
     },
 
-    /**
-      Decides how many pages to slide when sliding should occur. The default
-      simply scales the `intervalSize` to arrive at a fraction of the `intervalSize`
-      to increment.
-
-      __Note__: All the parameters have been normalized to be 0-based.
-
-      @param {number} firstPage
-      @param {number} lastPage
-      @param {number} currentPage
-      @param {number} intervalSize
-      @param {number} slideScale
-
-      @return {number}
-     */
-    slideThisMuch: function (firstPage, lastPage, currentPage, intervalSize, slideScale) {
-      return ~~(intervalSize * slideScale);
+    getPagesAfter: function(currentPage, intervalSize){
+      return Math.ceil(intervalSize  / 2);
     },
 
     _calculateInterval: function () {
@@ -412,14 +355,18 @@
       lastPage = Math.max(0, firstPage ? lastPage - 1 : lastPage);
       var currentPage = Math.max(state.currentPage, state.firstPage);
       currentPage = firstPage ? currentPage - 1 : currentPage;
-      var intervalSize = this.intervalSize;
-      var slideScale = this.slideScale;
-      var intervalStart = Math.floor(currentPage / intervalSize) * intervalSize;
-      if (currentPage <= lastPage - this.slideThisMuch()) {
-        intervalStart += (this.slideMaybe(firstPage, lastPage, currentPage, intervalSize, slideScale) *
-                        this.slideThisMuch(firstPage, lastPage, currentPage, intervalSize, slideScale));
+      var intervalStart = currentPage - this.getPagesBefore(currentPage, this.intervalSize);
+      var intervalEnd = currentPage + this.getPagesAfter(currentPage, this.intervalSize);
+      if (intervalStart < 0) {
+        intervalEnd -= intervalStart;
+        intervalStart = 0;
       }
-      var intervalEnd = Math.min(lastPage + 1, intervalStart + intervalSize);
+      if (intervalEnd > lastPage + 1) {
+        intervalEnd = lastPage + 1;
+        if (intervalEnd > this.intervalSize) {
+          intervalStart = intervalEnd - this.intervalSize;
+        }
+      }
       return [intervalStart, intervalEnd];
     },
 
