@@ -190,7 +190,6 @@
       var state = collection.state;
       var currentPage = state.currentPage;
       var pageIndex = this.pageIndex;
-      console.log(this.rewindPages, this.fastForwardPages);
       if (this.isFirst && currentPage == state.firstPage ||
          this.isBack && !collection.hasPreviousPage() ||
          this.isForward && !collection.hasNextPage() ||
